@@ -19,6 +19,9 @@ class Model:
         self.draw = ImageDraw.Draw(self.image)
         self.vertexes = []
         self.faces = []
+        self.zbuffer = []
+        for i in range(self.width*self.height):
+            self.zbuffer.append(-2147483648)
 
     def createImage(self):
         self.open('african_head.obj')
@@ -29,7 +32,8 @@ class Model:
             for i in range(len(faces)):
                 x = (float(self.vertexes[int(faces[i])-1][0])+1.)*self.width/2
                 y = (float(self.vertexes[int(faces[i])-1][1])+1.)*self.height/2
-                screenCoords.append([int(round(x)), int(round(y))])
+                z = (float(self.vertexes[int(faces[i])-1][2])+1.)*self.height/2
+                screenCoords.append([int(round(x)), int(round(y)), int(round(z))])
                 worldCoords.append([self.vertexes[int(faces[i])-1][0], self.vertexes[int(faces[i])-1][1], self.vertexes[int(faces[i])-1][2]])
             vx1 = float(worldCoords[0][0]) - float(worldCoords[1][0])
             vy1 = float(worldCoords[0][1]) - float(worldCoords[1][1])
@@ -48,9 +52,9 @@ class Model:
             n = N[0]*lightDir[0] + N[1]*lightDir[1] + N[2]*lightDir[2]
             n *= -1
             if n > 0:
-                model.triangle(screenCoords[0][0], screenCoords[0][1], 
-                    screenCoords[1][0], screenCoords[1][1], 
-                    screenCoords[2][0], screenCoords[2][1],
+                model.triangle(screenCoords[0][0], screenCoords[0][1], screenCoords[0][2],
+                    screenCoords[1][0], screenCoords[1][1], screenCoords[1][2],
+                    screenCoords[2][0], screenCoords[2][1], screenCoords[2][2],
                     (int(n*255), int(n*255), int(n*255)))
         self.save()
 
@@ -84,7 +88,7 @@ class Model:
             err = -dy
         err = int(err/2.0)
         line = []
-        while True:
+        while 1:
             self.draw.point((x0, y0), color)
             line.append([x0, y0])
             if x0 == x1 and y0 == y1:
@@ -98,31 +102,70 @@ class Model:
                 y0 += sy
         return line
 
+    def rasterize(self, x0, y0, x1, y1, color, ybuffer):
+        if x0 > x1:
+            x0, x1 = x1, x0
+            y0, y1 = y1, y0
+        for x in range(x0, x1):
+            t = (x-x0)/float(x1-x0)
+            y = int(y0*(1.0-t) + y1*t)
+            if ybuffer[x] < y:
+                ybuffer[x] = y
+                self.draw.point((x, 0), color)
+
     def save(self):
         self.image.transpose(1).save("output.png", "PNG")
 
-    def triangle(self, x0, y0, x1, y1, x2, y2, color):
+    def triangle(self, x0, y0, z0, x1, y1, z1, x2, y2, z2, color):
+        if y0 == y1 and y1 == y2:
+            return
         if y0 > y1:
             x0, x1 = x1, x0
             y0, y1 = y1, y0
-        if y1 > y2:
-            x1, x2 = x2, x1
-            y1, y2 = y2, y1
         if y0 > y2:
             x0, x2 = x2, x0
             y0, y2 = y2, y0
-        firstLine = self.line(x0, y0, x1, y1, color)
-        secondLine = self.line(x2, y2, x0, y0, color)
-        for i in firstLine:
-            for j in secondLine:
-                self.line(i[0], i[1], j[0], j[1], color)
+        if y1 > y2:
+            x1, x2 = x2, x1
+            y1, y2 = y2, y1
+        total_height = y2-y0;
+        for i in range(total_height):
+            second_half = (i>y1-y0) or (y1==y0)
+            alpha =i/(total_height*1.0)
+            ax = x0 + (x2-x0)*alpha
+            ay = y0 + (y2-y0)*alpha
+            az = z0 + (z2-z0)*alpha
+            if second_half:
+                segment_height = y2-y1
+                beta = (i-(y1-y0))/(segment_height*1.0)
+                bx = x1 + (x2-x1)*beta
+                by = y1 + (y2-y1)*beta
+                bz = z1 + (z2-z1)*beta
+            else:
+                segment_height = y1-y0
+                beta = i/(segment_height*1.0)
+                bx = x0 + (x1-x0)*beta
+                by = y0 + (y1-y0)*beta
+                bz = z0 + (z1-z0)*beta
+            if ax > bx:
+                ax, bx = bx, ax
+            for j in range(int(ax), int(bx)):
+                if ax == bx:
+                    phi = 1.0
+                else:
+                    phi = (j-ax)/(bx-ax)
+                px = ax +(bx-ax)*phi
+                py = ay +(by-ay)*phi
+                pz = az +(bz-az)*phi
+                idx = int(px+py*self.width)
+                if self.zbuffer[idx] < pz:
+                    self.zbuffer[idx] = pz
+                    self.draw.point((px, py), color)
+                
 
 if __name__ == '__main__':
     print 'Start'
     model = Model(800, 800)
     model.createImage()
-    #model.triangle(10, 70, 50, 160, 70, 80, '#FF00FF')
-    #model.triangle(180, 50, 150, 1, 70, 180, '#FFFFFF')
-    #model.triangle(180, 150, 120, 160, 130, 180, '#FF0000')
     model.save()
     print 'Done'
